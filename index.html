@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Tracking</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+    video { display: none; }
+    canvas { width: 100vw; height: 100vh; object-fit: cover; }
+  </style>
+</head>
+<body>
+  <video id="webcam" autoplay playsinline></video>
+  <canvas id="output_canvas"></canvas>
+
+  <script>
+    const videoElement = document.getElementById('webcam');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+
+    // Função para calcular distância 3D entre dois pontos
+    function dist(p1, p2) {
+      return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2) + Math.pow(p1.z - p2.z, 2));
+    }
+
+    // Função para converter distância em ângulo (0 a 180)
+    function mapRange(val, minIn, maxIn, minOut, maxOut) {
+      let mapped = (val - minIn) * (maxOut - minOut) / (maxIn - minIn) + minOut;
+      return Math.round(Math.min(Math.max(mapped, minOut), maxOut));
+    }
+
+    function onResults(results) {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
+
+        // Ponto 0 é o pulso (referência)
+        const wrist = landmarks[0];
+
+        // Distância normalizada pela palma da mão (ponto 0 ao 9)
+        const palmSize = dist(wrist, landmarks[9]);
+
+        // Mapeamento das pontas dos dedos: Polegar(4), Indicador(8), Médio(12), Anelar(16), Mínimo(20)
+        const thumbAng = mapRange(dist(landmarks[4], landmarks[17]) / palmSize, 0.4, 0.9, 0, 180);
+        const indexAng = mapRange(dist(landmarks[8], wrist) / palmSize, 0.6, 1.8, 0, 180);
+        const middleAng = mapRange(dist(landmarks[12], wrist) / palmSize, 0.6, 1.9, 0, 180);
+        const ringAng = mapRange(dist(landmarks[16], wrist) / palmSize, 0.6, 1.8, 0, 180);
+        const pinkyAng = mapRange(dist(landmarks[20], wrist) / palmSize, 0.5, 1.6, 0, 180);
+
+        // String formatada com os 5 valores separados por vírgula
+        const dataString = `${thumbAng},${indexAng},${middleAng},${ringAng},${pinkyAng}`;
+
+        // Envia a String para o MIT App Inventor
+        if (window.AppInventor) {
+          window.AppInventor.setWebViewString(dataString);
+        }
+      }
+      canvasCtx.restore();
+    }
+
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    hands.onResults(onResults);
+
+    // Inicialização direta da Câmera utilizando getUserMedia (solução para permissão no Android WebView)
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: "user"
+        }
+      }).then((stream) => {
+        videoElement.srcObject = stream;
+        videoElement.play();
+
+        const camera = new Camera(videoElement, {
+          onFrame: async () => {
+            await hands.send({ image: videoElement });
+          },
+          width: 640,
+          height: 480
+        });
+        camera.start();
+      }).catch((err) => {
+        alert("Erro ao acessar a câmera: " + err);
+      });
+    } else {
+      alert("A câmera não é suportada neste dispositivo/navegador.");
+    }
+  </script>
+</body>
+</html>
